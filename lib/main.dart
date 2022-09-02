@@ -1,8 +1,9 @@
 // ignore_for_file: prefer_const_constructors, avoid_function_literals_in_foreach_calls, prefer_final_fields, sized_box_for_whitespace, unnecessary_string_interpolations
 
 import 'dart:async';
-import 'package:convert/convert.dart';
-import 'package:flutter/services.dart';
+// import 'package:curved_navigation_bar/curved_navigation_bar.dart';
+import 'package:flutter_spinkit/flutter_spinkit.dart';
+import 'package:location/location.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import './ev_collections.dart';
 import 'dart:convert';
@@ -12,8 +13,10 @@ import 'package:flutter_polyline_points/flutter_polyline_points.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 void main() {
-  runApp(
-      MaterialApp(theme: ThemeData(primaryColor: Colors.black), home: MyApp()));
+  runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(primaryColor: Colors.black),
+      home: MyApp()));
 }
 
 class MyApp extends StatefulWidget {
@@ -25,28 +28,45 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   final itemController = ItemScrollController();
+  bool loading = true;
   String activeId = '';
   String mapTheme = '';
   Completer<GoogleMapController> _controller = Completer();
   bool isMapCreated = false;
-  static const sourceLocation = LatLng(12.9070513, 77.5675009);
+  LocationData? currentLocation;
+  bool alert = false;
+  String destination = "";
+
+  void setAlert() {
+    setState(() {
+      alert = true;
+    });
+    Future.delayed(Duration(seconds: 5), () {
+      setState(() {
+        alert = false;
+      });
+    });
+  }
+
+  void setDestination(String value) {
+    setState(() {
+      destination = value;
+    });
+  }
+
   static String googleApiKey = "AIzaSyDjj1s1972Cg_pDtmWC5QGse4UMIcgWQUQ";
-  static const _initialCameraPosition =
-      CameraPosition(target: sourceLocation, zoom: 16);
 
   List<LatLng> polylineCoordinates = [];
   List<ChargingLocation> locations = [];
-  Set<Marker> _markers = {
-    Marker(markerId: MarkerId("source"), position: sourceLocation),
-  };
+  Set<Marker> _markers = {};
 
   // Get Poly Points
-  void getPolyPoints(desLat, desLng, id) async {
+  void getPolyPoints(desLat, desLng, id, name) async {
     polylineCoordinates = [];
     PolylinePoints polylinePoints = PolylinePoints();
     PolylineResult results = await polylinePoints.getRouteBetweenCoordinates(
         googleApiKey,
-        PointLatLng(sourceLocation.latitude, sourceLocation.longitude),
+        PointLatLng(currentLocation!.latitude!, currentLocation!.longitude!),
         PointLatLng(desLat, desLng));
 
     if (results.points.isNotEmpty) {
@@ -60,12 +80,22 @@ class _MyAppState extends State<MyApp> {
             index: index, duration: Duration(milliseconds: 500));
       });
     }
+    setDestination(name);
   }
 
   // Get Locations
   void getLocations() async {
-    String url =
-        "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=12.9070513%2C77.5675009&radius=30000&keyword=electric%2Cvehicle%2Ccharging&key=AIzaSyDjj1s1972Cg_pDtmWC5QGse4UMIcgWQUQ";
+    Location location = Location();
+    var res = await location.getLocation();
+    currentLocation = res;
+
+    location.onLocationChanged.listen((newLoc) {
+      currentLocation = newLoc;
+      setState(() {});
+    });
+
+    late String url =
+        "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${currentLocation!.latitude!}%2C${currentLocation!.longitude!}&radius=30000&keyword=electric%2Cvehicle%2Ccharging&key=AIzaSyDjj1s1972Cg_pDtmWC5QGse4UMIcgWQUQ";
     var response = await http.get(Uri.parse(url));
     var data = await jsonDecode(response.body);
     data['results'].forEach((element) {
@@ -84,7 +114,7 @@ class _MyAppState extends State<MyApp> {
           markerId: MarkerId(element.id),
           position: LatLng(element.lat, element.lng),
           onTap: () {
-            getPolyPoints(element.lat, element.lng, element.id);
+            getPolyPoints(element.lat, element.lng, element.id, element.name);
           },
           infoWindow: InfoWindow(
               title: element.name,
@@ -93,14 +123,8 @@ class _MyAppState extends State<MyApp> {
           icon:
               BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue)));
     });
+    setState(() {});
   }
-
-  // void scrollToIndex(int index) {
-  //   itemController.jumpTo(
-  //     index: index,
-  //   );
-  //   print("Required scroll $index");
-  // }
 
   @override
   void initState() {
@@ -108,87 +132,164 @@ class _MyAppState extends State<MyApp> {
     DefaultAssetBundle.of(context).loadString('assets/dark.json').then((value) {
       mapTheme = value;
     });
+    // getCurrentLocation();
     getLocations();
-    setState(() {});
+    setState(() {
+      loading = false;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return (Scaffold(
-        body: Stack(
-      children: [
-        GoogleMap(
-          mapType: MapType.normal,
-          myLocationEnabled: true,
-          myLocationButtonEnabled: true,
-          initialCameraPosition: _initialCameraPosition,
-          onMapCreated: (GoogleMapController controller) {
-            controller.setMapStyle(mapTheme);
-            // _controller.complete(controller);
-          },
-          polylines: {
-            Polyline(
-                polylineId: PolylineId("route"),
-                points: polylineCoordinates,
-                color: Colors.blueAccent,
-                width: 6)
-          },
-          markers: _markers,
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 80, 0, 0),
-          child: SizedBox(
-            height: 100,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(
-                    child: ScrollablePositionedList.builder(
-                  itemCount: locations.isNotEmpty ? locations.length : 0,
-                  shrinkWrap: true,
-                  itemBuilder: (context, index) {
-                    return StationBox(
-                        setRoute: getPolyPoints,
-                        lat: locations[index].lat,
-                        currentIndex: index,
-                        lng: locations[index].lng,
-                        id: locations[index].id,
-                        name: locations[index].name,
-                        vicinity: locations[index].vicinity,
-                        open: locations[index].open,
-                        activeId: activeId);
-                  },
-                  itemScrollController: itemController,
-                  scrollDirection: Axis.horizontal,
-                  // children: locations.isNotEmpty
-                  //     ? locations
-                  //         .map((station) => StationBox(
-                  //             setRoute: getPolyPoints,
-                  //             lat: station.lat,
-                  //             lng: station.lng,
-                  //             id: station.id,
-                  //             name: station.name,
-                  //             vicinity: station.vicinity,
-                  //             open: station.open,
-                  //             activeId: activeId))
-                  //         .toList()
-                  //     : [Text("No Locations")],
-                ))
-              ],
+    if (loading == true) {
+      return (Scaffold(
+        body: Container(
+          color: Color.fromARGB(255, 7, 24, 52),
+          child: Center(
+            child: SpinKitPulse(
+              color: Colors.white,
             ),
           ),
-        )
-      ],
-    )));
+        ),
+      ));
+    } else {
+      return (Scaffold(
+          extendBody: true,
+          floatingActionButton: Visibility(
+            visible: (polylineCoordinates.isEmpty ? false : true),
+            child: FloatingActionButton(
+              backgroundColor: Colors.red,
+              onPressed: () => setAlert(),
+              child: Container(
+                height: 50,
+                width: 50,
+                decoration:
+                    BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                child: Center(
+                  child: Icon(
+                    Icons.sos,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          body: currentLocation == null
+              ? Container(
+                  color: Color.fromARGB(255, 10, 44, 71),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    // ignore: prefer_const_literals_to_create_immutables
+                    children: [
+                      SpinKitPulse(
+                        color: Colors.white,
+                      ),
+                      Text(
+                        "Fetching Location",
+                        style: TextStyle(color: Colors.white),
+                      )
+                    ],
+                  ),
+                )
+              : Stack(
+                  children: [
+                    GoogleMap(
+                      mapType: MapType.normal,
+                      mapToolbarEnabled: false,
+                      zoomControlsEnabled: false,
+                      initialCameraPosition: CameraPosition(
+                          target: LatLng(currentLocation!.latitude!,
+                              currentLocation!.longitude!),
+                          zoom: 14),
+                      onMapCreated: (GoogleMapController controller) {
+                        controller.setMapStyle(mapTheme);
+                      },
+                      polylines: {
+                        Polyline(
+                            polylineId: PolylineId("route"),
+                            points: polylineCoordinates,
+                            color: Colors.cyanAccent,
+                            width: 6)
+                      },
+                      markers: {
+                        ..._markers,
+                        Marker(
+                            markerId: MarkerId("currentLocation"),
+                            position: LatLng(currentLocation!.latitude!,
+                                currentLocation!.longitude!))
+                      },
+                    ),
+                    Visibility(
+                      visible: alert,
+                      child: AlertDialog(
+                        title: Text(
+                          "Alert !!!",
+                          style: TextStyle(color: Colors.white),
+                        ),
+                        content: Container(
+                            child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              "SOS has been sent to \n$destination",
+                              maxLines: 3,
+                              style: TextStyle(color: Colors.white),
+                            ),
+                            SizedBox(
+                              width: 20,
+                            ),
+                            Icon(
+                              Icons.battery_0_bar,
+                              color: Colors.white,
+                            )
+                          ],
+                        )),
+                        backgroundColor: Colors.redAccent,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 80, 0, 0),
+                      child: SizedBox(
+                        height: 100,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Expanded(
+                                child: ScrollablePositionedList.builder(
+                              itemCount:
+                                  locations.isNotEmpty ? locations.length : 0,
+                              shrinkWrap: true,
+                              itemBuilder: (context, index) {
+                                return StationBox(
+                                    setRoute: getPolyPoints,
+                                    lat: locations[index].lat,
+                                    setDestination: setDestination,
+                                    currentIndex: index,
+                                    lng: locations[index].lng,
+                                    id: locations[index].id,
+                                    name: locations[index].name,
+                                    vicinity: locations[index].vicinity,
+                                    open: locations[index].open,
+                                    activeId: activeId);
+                              },
+                              itemScrollController: itemController,
+                              scrollDirection: Axis.horizontal,
+                            ))
+                          ],
+                        ),
+                      ),
+                    )
+                  ],
+                )));
+    }
   }
 }
 
 class StationBox extends StatefulWidget {
   String name;
-  // ignore: prefer_typing_uninitialized_variables
   final setRoute;
-  // ignore: prefer_typing_uninitialized_variables
-  // final setScroll;
   String vicinity;
   int currentIndex;
   String id;
@@ -196,6 +297,7 @@ class StationBox extends StatefulWidget {
   double lat;
   double lng;
   String activeId;
+  final setDestination;
   StationBox(
       {Key? key,
       // required this.setScroll,
@@ -205,6 +307,7 @@ class StationBox extends StatefulWidget {
       required this.lng,
       required this.id,
       required this.activeId,
+      required this.setDestination,
       required this.name,
       required this.vicinity,
       required this.open})
@@ -228,8 +331,11 @@ class _StationBoxState extends State<StationBox> {
       onTap: () {
         if (!inUse) {
           inUse = true;
-          widget.setRoute(widget.lat, widget.lng, widget.id);
-          setState(() {});
+
+          setState(() {
+            widget.setRoute(widget.lat, widget.lng, widget.id);
+            widget.setDestination(widget.name);
+          });
         } else {
           inUse = false;
           setState(() {});
@@ -237,7 +343,7 @@ class _StationBoxState extends State<StationBox> {
       },
       child: Container(
         margin: EdgeInsets.fromLTRB(0, 0, 8.0, 0),
-        height: 100,
+        height: 200,
         width: 300,
         decoration: BoxDecoration(
             gradient: LinearGradient(
