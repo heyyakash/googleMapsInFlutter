@@ -36,6 +36,7 @@ class _MyAppState extends State<MyApp> {
   LocationData? currentLocation;
   bool alert = false;
   String destination = "";
+  bool error = false;
 
   void setAlert() {
     setState(() {
@@ -85,45 +86,51 @@ class _MyAppState extends State<MyApp> {
 
   // Get Locations
   void getLocations() async {
-    Location location = Location();
-    var res = await location.getLocation();
-    currentLocation = res;
+    try {
+      Location location = Location();
+      var res = await location.getLocation();
+      currentLocation = res;
 
-    location.onLocationChanged.listen((newLoc) {
-      currentLocation = newLoc;
+      location.onLocationChanged.listen((newLoc) {
+        currentLocation = newLoc;
+        setState(() {});
+      });
+
+      late String url =
+          "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${currentLocation!.latitude!}%2C${currentLocation!.longitude!}&radius=30000&keyword=electric%2Cvehicle%2Ccharging&key=AIzaSyDjj1s1972Cg_pDtmWC5QGse4UMIcgWQUQ";
+      var response = await http.get(Uri.parse(url));
+      var data = await jsonDecode(response.body);
+      data['results'].forEach((element) {
+        ChargingLocation data = ChargingLocation(
+            lat:
+                double.parse(element['geometry']['location']['lat'].toString()),
+            lng:
+                double.parse(element['geometry']['location']['lng'].toString()),
+            name: element['name'],
+            id: element['place_id'],
+            open: true,
+            vicinity: element["vicinity"]);
+        locations.add(data);
+      });
+
+      locations.forEach((element) {
+        _markers.add(Marker(
+            markerId: MarkerId(element.id),
+            position: LatLng(element.lat, element.lng),
+            onTap: () {
+              getPolyPoints(element.lat, element.lng, element.id, element.name);
+            },
+            infoWindow: InfoWindow(
+                title: element.name,
+                snippet: element.vicinity
+                    .replaceRange(20, element.vicinity.length, '...')),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+                BitmapDescriptor.hueBlue)));
+      });
       setState(() {});
-    });
-
-    late String url =
-        "https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${currentLocation!.latitude!}%2C${currentLocation!.longitude!}&radius=30000&keyword=electric%2Cvehicle%2Ccharging&key=AIzaSyDjj1s1972Cg_pDtmWC5QGse4UMIcgWQUQ";
-    var response = await http.get(Uri.parse(url));
-    var data = await jsonDecode(response.body);
-    data['results'].forEach((element) {
-      ChargingLocation data = ChargingLocation(
-          lat: double.parse(element['geometry']['location']['lat'].toString()),
-          lng: double.parse(element['geometry']['location']['lng'].toString()),
-          name: element['name'],
-          id: element['place_id'],
-          open: true,
-          vicinity: element["vicinity"]);
-      locations.add(data);
-    });
-
-    locations.forEach((element) {
-      _markers.add(Marker(
-          markerId: MarkerId(element.id),
-          position: LatLng(element.lat, element.lng),
-          onTap: () {
-            getPolyPoints(element.lat, element.lng, element.id, element.name);
-          },
-          infoWindow: InfoWindow(
-              title: element.name,
-              snippet: element.vicinity
-                  .replaceRange(20, element.vicinity.length, '...')),
-          icon:
-              BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue)));
-    });
-    setState(() {});
+    } catch (err) {
+      error = true;
+    }
   }
 
   @override
@@ -150,6 +157,24 @@ class _MyAppState extends State<MyApp> {
               color: Colors.white,
             ),
           ),
+        ),
+      ));
+    } else if (error) {
+      return (Scaffold(
+        body: Container(
+          color: Color.fromARGB(255, 10, 44, 71),
+          child: Center(
+              child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text("Oops!",
+                    style: TextStyle(color: Colors.white, fontSize: 60)),
+                Text(
+                  "Please Reopen the App",
+                  style: TextStyle(color: Colors.white),
+                )
+              ])),
         ),
       ));
     } else {
